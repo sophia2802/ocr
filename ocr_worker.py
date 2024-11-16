@@ -1,6 +1,7 @@
 import pika
 import pytesseract
 from PIL import Image
+import pdf2image
 import os
 import time
 
@@ -8,7 +9,6 @@ import time
 def connect_to_queue():
     while True:
         try:
-            # Verbindung mit den korrekten Zugangsdaten herstellen
             connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
                     host='rabbitmq',
@@ -16,7 +16,7 @@ def connect_to_queue():
                 )
             )
             channel = connection.channel()
-            channel.queue_declare(queue='ocrQueue')
+            channel.queue_declare(queue='documentQueue')
             channel.queue_declare(queue='ocrResultQueue')
             print("Connected to RabbitMQ")
             return connection, channel
@@ -24,28 +24,29 @@ def connect_to_queue():
             print("Connection to RabbitMQ failed, retrying in 5 seconds...")
             time.sleep(5)
 
-def perform_ocr(file_path):
-    # OCR auf das Bild anwenden
+def perform_ocr_on_pdf(pdf_path):
+    text_result = ""
     try:
-        image = Image.open(file_path)
-        text = pytesseract.image_to_string(image)
-        return text
+        images = pdf2image.convert_from_path(pdf_path)
+        for image in images:
+            text_result += pytesseract.image_to_string(image) + "\n"
     except Exception as e:
         print(f"OCR failed: {e}")
-        return "OCR failed"
+        text_result = "OCR failed"
+    return text_result
 
 def on_message(ch, method, properties, body):
-    file_path = body.decode()
-    print(f"Received file path for OCR: {file_path}")
+    pdf_path = body.decode()
+    print(f"Received file path for OCR: {pdf_path}")
 
-    # OCR durchführen und das Ergebnis senden
-    result_text = perform_ocr(file_path)
+    result_text = perform_ocr_on_pdf(pdf_path)
     ch.basic_publish(exchange='', routing_key='ocrResultQueue', body=result_text)
     print("OCR result sent to ocrResultQueue")
 
+
 def start_worker():
     connection, channel = connect_to_queue()
-    channel.basic_consume(queue='ocrQueue', on_message_callback=on_message, auto_ack=True)
+    channel.basic_consume(queue='documentQueue', on_message_callback=on_message, auto_ack=True)
     print("OCR Worker is waiting for messages...")
     channel.start_consuming()
 
