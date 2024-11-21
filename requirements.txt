@@ -2,3 +2,4 @@ pytesseract
 pika  # Für die Verbindung zu RabbitMQ
 Pillow  # Für die Bildverarbeitung
 pdf2image
+minio
