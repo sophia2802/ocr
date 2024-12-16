@@ -6,16 +6,19 @@ import os
 import time
 import tempfile
 import logging
-from minio_client import upload_file, download_file  # Importiere MinIO-Funktionen
+from elasticsearch import Elasticsearch
+from minio_client import upload_file, download_file
 
 logging.basicConfig(
-    filename='/app/ocr_worker.log',  # In Docker, speichere es in /app
+    filename='/app/ocr_worker.log',
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
 BUCKET_NAME = "documents"
+
+es = Elasticsearch("http://elasticsearch:9200")
 
 # Verbindung zu RabbitMQ herstellen
 def connect_to_queue():
@@ -48,6 +51,14 @@ def perform_ocr_on_pdf(pdf_path):
         text_result = "OCR failed"
     return text_result
 
+
+def index_document(index_name, doc_id, content):
+    try:
+        es.index(index=index_name, id=doc_id, document={"content": content})
+        print(f"Document indexed in Elasticsearch: {doc_id}")
+    except Exception as e:
+        print(f"Failed to index document in Elasticsearch: {e}")
+
 def on_message(ch, method, properties, body):
     object_name = body.decode()
     print(f"Received file for OCR: {object_name}")
@@ -69,6 +80,9 @@ def on_message(ch, method, properties, body):
         result_object_name = os.path.join("shared-files", f"{object_name}_result.txt")
         logger.info(f"result_object_name: {result_object_name}")
         upload_file(BUCKET_NAME, result_path, result_object_name)
+
+        index_document("ocr_results", object_name, result_text)
+        print(f"OCR result indexed in Elasticsearch: {object_name}")
 
         ch.basic_publish(exchange='', routing_key='ocrResultQueue', body=result_text)
         print(f"OCR result uploaded to MinIO and sent to ocrResultQueue: '{result_object_name}'")
